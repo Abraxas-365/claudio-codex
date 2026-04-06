@@ -1,0 +1,4 @@
+bin/
+/claudio-codex
+*.db
+.DS_Store
