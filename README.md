@@ -74,7 +74,12 @@ These are stored in a **SQLite database** (one per repo) under `~/.claudio/codex
 
 ### 2. Incremental refresh
 
-On every query the binary calls `index.Refresh(store)` which checks file mtimes against the index and re-parses only the files that have changed. You almost never need to re-run `index` manually.
+The index stays fresh in two complementary ways:
+
+1. **Lazy refresh on query.** Every `search`/`refs`/`context`/etc. call begins with `index.Refresh(store)`, which compares each file's `mtime + size` against the DB and re-parses only the files that have actually changed. Unchanged files are skipped without even being read.
+2. **Hook-driven refresh.** When wired into Claudio's hooks (see [Auto-indexing](#auto-indexing-recommended)), the plugin re-runs `index` automatically on `SessionStart`, after every `Write`/`Edit`/`NotebookEdit`, and on `CwdChanged`. This keeps the cache warm so the first query of a session is just as cheap as the hundredth.
+
+Each project gets its own database under `~/.claudio/codex/<sha256-of-abs-path>.db`, so switching repos never invalidates another repo's index.
 
 ### 3. Querying
 
@@ -153,6 +158,38 @@ claudio                # launch Claudio — the plugin is auto-discovered
 
 ---
 
+## Auto-indexing (recommended)
+
+To keep the index continuously up to date without ever running `claudio-codex index` by hand, install the bundled hooks into your Claudio settings:
+
+```bash
+claudio-codex install-hooks
+# or, from a source checkout:
+make install-hooks
+```
+
+This merges three entries into `~/.claudio/settings.json` (existing user hooks are preserved; previously-installed claudio-codex hooks are replaced so re-running is idempotent):
+
+| Event | When it fires | What it does |
+|---|---|---|
+| `SessionStart` | Every time you launch Claudio | Refreshes the index for the current project |
+| `PostToolUse` (matcher: `Write\|Edit\|NotebookEdit`) | After the agent writes or edits any file | Incrementally re-parses only the changed file |
+| `CwdChanged` | When Claudio's working directory changes | Refreshes the index for the new project |
+
+All three hooks run with `async: true`, so they never block the agent — by the time the model issues its first `claudio-codex` query, the index is already fresh.
+
+You can also preview the snippet without installing it:
+
+```bash
+claudio-codex --hooks
+```
+
+Or copy `hooks.json` from this repo into your settings manually if you prefer to merge it yourself.
+
+> Why hooks instead of a file watcher? Claudio already knows precisely when files change (it's the one writing them), and it knows when sessions start and stop. Piggy-backing on the existing event bus is dramatically simpler — and cheaper — than running a long-lived `fsnotify` daemon per project.
+
+---
+
 ## Commands
 
 | Command | Description |
@@ -166,6 +203,10 @@ claudio                # launch Claudio — the plugin is auto-discovered
 | `outline <file>` | List all symbols in a file |
 | `structure` | High-level codebase overview |
 | `hotspots [limit]` | Most-referenced symbols |
+| `install-hooks` | Merge the recommended auto-index hooks into `~/.claudio/settings.json` |
+| `--hooks` | Print the recommended hooks JSON snippet to stdout |
+| `--describe` / `--instructions` / `--schema` | Plugin metadata used by Claudio for auto-discovery |
+| `--version` | Print the binary version |
 
 The `context` command also accepts `file:line` references, e.g. `claudio-codex context internal/query/engine.go:29`.
 

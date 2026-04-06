@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "id": "claudio-codex-session-refresh",
+            "type": "command",
+            "command": "claudio-codex index >/dev/null 2>&1 || true",
+            "async": true,
+            "description": "Refresh the claudio-codex index at session start"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "id": "claudio-codex-post-edit",
+            "type": "command",
+            "command": "claudio-codex index >/dev/null 2>&1 || true",
+            "async": true,
+            "description": "Incrementally re-index after the agent edits a file"
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "id": "claudio-codex-cwd-refresh",
+            "type": "command",
+            "command": "claudio-codex index >/dev/null 2>&1 || true",
+            "async": true,
+            "description": "Refresh the index when switching projects"
+          }
+        ]
+      }
+    ]
+  }
+}
