@@ -89,6 +89,13 @@ make install-plugin
 claudio-codex --version
 ```
 
+> **Global CLI access:** The binary lives in `~/.claudio/plugins/`. To use `claudio-codex` from any terminal, add that directory to your `PATH`:
+>
+> ```bash
+> # add to ~/.zshrc or ~/.bashrc
+> export PATH="$HOME/.claudio/plugins:$PATH"
+> ```
+
 ---
 
 ## Quick start
