@@ -25,7 +25,9 @@ ALWAYS prefer plugin_claudio-codex over Grep, Read, or Glob when the task involv
 
 The "context" command accepts both symbol names ("EventHandler") and file:line references ("internal/query/engine.go:29").
 
-Fall back to Grep/Read only when the index hasn't been built yet (you'll see "Run 'claudio-codex index' first") or when searching for string literals/comments that aren't symbols.`
+Multi-project support: use the optional "--dir <path>" flag to query a different project's index without changing directory. Example: pass args as "--dir /path/to/other-project search MySymbol". Each project must be indexed separately with "claudio-codex index <path>" before querying. If a project is not indexed you will get an error telling you to ask the user to run the index command — do NOT run it yourself as it can be slow.
+
+Fall back to Grep/Read only when the index hasn't been built yet or when searching for string literals/comments that aren't symbols.`
 
 // hooksSnippet is the recommended Claudio hooks configuration that keeps the
 // code index continuously refreshed without manual `claudio-codex index` runs.
@@ -79,6 +81,9 @@ const hooksSnippet = `{
 
 const description = `Code index plugin for claudio. Provides fast symbol search, cross-references, call graphs, and impact analysis using tree-sitter parsing.
 
+Global flags:
+  --dir <path>          Query the index of a specific project directory instead of the current one
+
 Commands:
   index [dir]           Build or refresh the code index (default: current dir)
   search <query>        Search for symbols by name
@@ -88,7 +93,14 @@ Commands:
   outline <file>        List all symbols in a file
   context <symbol>      Bundled view: definition + source + callers + callees
   structure             High-level codebase overview
-  hotspots [limit]      Most-referenced symbols`
+  hotspots [limit]      Most-referenced symbols
+
+Examples (multi-project):
+  claudio-codex --dir /path/to/ts-project search fetchUser
+  claudio-codex --dir /path/to/go-project search UserHandler`
+
+// globalDir holds the value of the --dir flag, if provided.
+var globalDir string
 
 func main() {
 	if len(os.Args) < 2 {
@@ -96,6 +108,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, description)
 		os.Exit(1)
 	}
+
+	// Strip --dir <path> from args before dispatching commands.
+	args := os.Args[1:]
+	filtered := args[:0:0]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--dir" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --dir requires a path argument")
+				os.Exit(1)
+			}
+			globalDir = args[i+1]
+			i++ // skip the path value
+		} else {
+			filtered = append(filtered, args[i])
+		}
+	}
+	os.Args = append([]string{os.Args[0]}, filtered...)
 
 	cmd := os.Args[1]
 
@@ -264,11 +293,31 @@ func findRepoRoot() string {
 }
 
 func openStore() (*index.Store, error) {
-	repoDir := findRepoRoot()
+	var repoDir string
+	if globalDir != "" {
+		abs, err := filepath.Abs(globalDir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --dir path: %w", err)
+		}
+		if _, err := os.Stat(abs); os.IsNotExist(err) {
+			return nil, fmt.Errorf("directory not found: %s", abs)
+		}
+		repoDir = abs
+	} else {
+		repoDir = findRepoRoot()
+	}
+
 	dbPath, err := index.DBPathForRepo(repoDir)
 	if err != nil {
 		return nil, err
 	}
+
+	if globalDir != "" {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			return nil, fmt.Errorf("project not indexed, run: claudio-codex index %s", repoDir)
+		}
+	}
+
 	return index.Open(dbPath, repoDir)
 }
 
@@ -305,7 +354,7 @@ func runIndex(dir string) {
 func runQuery(fn func(store *index.Store) (string, error)) {
 	store, err := openStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\nRun 'claudio-codex index' first.\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	defer store.Close()
@@ -420,7 +469,7 @@ func printSchema() {
 			},
 			"args": map[string]any{
 				"type":        "string",
-				"description": "Arguments for the command (symbol name, file path, etc.)",
+				"description": "Arguments for the command (symbol name, file path, etc.). Optionally prefix with '--dir <path> ' to query a different project's index.",
 			},
 		},
 		"required": []string{"command"},
